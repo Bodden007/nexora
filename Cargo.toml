@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+pcap = "2.5.0"
+serialport = "4.10.1"
+serde = { version = "1", features = ["derive"] }
+toml = "1.1.8"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Foundation", "Win32_Networking_WinSock"] }
