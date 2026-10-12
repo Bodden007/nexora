@@ -1,0 +1,20 @@
+
+# Rust / Cargo
+/target/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local configuration
+/nexora.toml
+
+# Logs
+*.log
+
