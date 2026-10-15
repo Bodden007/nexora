@@ -1,4 +1,6 @@
-pub mod config;
+pub mod app;
+
+use app::{config, sniffer};
 
 pub fn run() -> Result<(), String> {
     let configuration = config::load()?;
@@ -8,7 +10,9 @@ pub fn run() -> Result<(), String> {
     println!("CompactRIO: {}", configuration.ethernet.interface);
     println!("Modbus TCP: {}", configuration.modbus.interface);
 
-    println!("NEXORA: штатный запуск пока не реализован");
+    if !configuration.ethernet.interface.is_empty() {
+        sniffer::run(&configuration.ethernet.interface)?;
+    }
 
     Ok(())
 }
