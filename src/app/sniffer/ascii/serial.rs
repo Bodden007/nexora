@@ -1,19 +1,29 @@
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use super::coordinator::{Protocol, select_source};
-use super::detector::is_flecs_line;
+use super::super::coordinator::{Protocol, select_source};
+use super::super::detection::is_flecs_line;
+use super::flecs;
 
 const BAUD_RATE: u32 = 9600;
 const TIMEOUT_MS: u64 = 100;
 const REQUIRED_MESSAGES: usize = 3;
 const MAX_LINE_LENGTH: usize = 4096;
 
+const DATA_TIMEOUT: Duration = Duration::from_secs(5);
+const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+fn should_run(selected: &AtomicU8) -> bool {
+    let state = selected.load(Ordering::Acquire);
+
+    state == 0 || state == Protocol::Flecs as u8
+}
+
 pub fn run(port_name: &str, selected: &AtomicU8) -> Result<(), String> {
     let mut last_error = String::new();
 
-    while selected.load(Ordering::Acquire) == 0 {
+    while should_run(selected) {
         let result = match serialport::new(port_name, BAUD_RATE)
             .timeout(Duration::from_millis(TIMEOUT_MS))
             .open()
@@ -23,24 +33,27 @@ pub fn run(port_name: &str, selected: &AtomicU8) -> Result<(), String> {
 
                 let result = read_flecs(port.as_mut(), port_name, selected);
 
-                // Закрываем дескриптор до повторного открытия.
                 drop(port);
-
                 result
             }
 
             Err(error) => Err(format!("Не удалось открыть {port_name}: {error}")),
         };
 
-        if selected.load(Ordering::Acquire) != 0 {
+        if !should_run(selected) {
             break;
         }
 
-        if let Err(error) = result {
-            // Не засоряем консоль одинаковыми ошибками.
-            if error != last_error {
-                eprintln!("[FLECS] {error}");
-                last_error = error;
+        match result {
+            Ok(()) => {
+                last_error.clear();
+            }
+
+            Err(error) => {
+                if error != last_error {
+                    eprintln!("[FLECS] {error}");
+                    last_error = error;
+                }
             }
         }
 
@@ -51,18 +64,10 @@ pub fn run(port_name: &str, selected: &AtomicU8) -> Result<(), String> {
 }
 
 fn wait_retry(selected: &AtomicU8) {
-    const RETRY_INTERVAL: Duration = Duration::from_secs(1);
-    const CHECK_INTERVAL: Duration = Duration::from_millis(100);
+    let start = Instant::now();
 
-    let mut elapsed = Duration::ZERO;
-
-    while elapsed < RETRY_INTERVAL {
-        if selected.load(Ordering::Acquire) != 0 {
-            return;
-        }
-
-        std::thread::sleep(CHECK_INTERVAL);
-        elapsed += CHECK_INTERVAL;
+    while should_run(selected) && start.elapsed() < RETRY_INTERVAL {
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -73,20 +78,24 @@ fn read_flecs(
 ) -> Result<(), String> {
     let mut input = [0u8; 1024];
     let mut line = Vec::<u8>::new();
+
     let mut valid_messages = 0usize;
     let mut skip_lf = false;
     let mut discard_line = false;
 
-    while selected.load(Ordering::Acquire) == 0 {
+    let mut last_valid_message = Instant::now();
+
+    while should_run(selected) {
         match port.read(&mut input) {
             Ok(count) => {
                 for &byte in &input[..count] {
-                    if selected.load(Ordering::Acquire) != 0 {
+                    if !should_run(selected) {
                         return Ok(());
                     }
 
                     if skip_lf {
                         skip_lf = false;
+
                         if byte == b'\n' {
                             continue;
                         }
@@ -108,29 +117,46 @@ fn read_flecs(
                             continue;
                         }
 
-                        let valid = std::str::from_utf8(&line).is_ok_and(is_flecs_line);
+                        let parsed = std::str::from_utf8(&line).ok();
+                        let valid = parsed.is_some_and(is_flecs_line);
 
-                        line.clear();
-
-                        if valid {
-                            valid_messages += 1;
-                        } else {
+                        if !valid {
                             valid_messages = 0;
+                            line.clear();
+                            continue;
                         }
 
-                        if valid_messages >= REQUIRED_MESSAGES {
-                            if select_source(selected, Protocol::Flecs) {
+                        last_valid_message = Instant::now();
+
+                        if selected.load(Ordering::Acquire) == 0 {
+                            valid_messages += 1;
+
+                            if valid_messages >= REQUIRED_MESSAGES
+                                && select_source(selected, Protocol::Flecs)
+                            {
                                 println!("[FLECS] Протокол подтверждён");
                                 println!("[FLECS] Порт: {port_name}");
                                 println!(
                                     "[FLECS] Корректных сообщений: \
-                                     {valid_messages}"
+                                        {valid_messages}"
                                 );
                             }
-
-                            return Ok(());
                         }
 
+                        if selected.load(Ordering::Acquire) == Protocol::Flecs as u8
+                            && let Some(text) = parsed
+                        {
+                            match flecs::parse_line(text) {
+                                Ok(data) => {
+                                    println!("[FLECS] {data:#?}");
+                                }
+                                Err(error) => {
+                                    eprintln!("[FLECS] Ошибка парсера: {error}");
+                                }
+                            }
+                        }
+
+                        line.clear();
                         continue;
                     }
 
@@ -154,6 +180,13 @@ fn read_flecs(
             Err(error) => {
                 return Err(format!("Ошибка чтения {port_name}: {error}"));
             }
+        }
+
+        if last_valid_message.elapsed() >= DATA_TIMEOUT {
+            return Err(format!(
+                "Нет корректных данных от {port_name} \
+                 в течение 5 секунд"
+            ));
         }
     }
 

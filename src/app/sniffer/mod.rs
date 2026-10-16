@@ -1,6 +1,6 @@
-mod capture;
+mod ascii;
 mod coordinator;
-mod detector;
-mod serial;
+mod detection;
+mod llc;
 
 pub use coordinator::run;

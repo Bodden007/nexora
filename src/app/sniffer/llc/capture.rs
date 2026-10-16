@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use pcap::{Active, Capture, Error};
 
-use super::coordinator::{Protocol, select_source};
-use super::detector::is_crio_frame;
+use super::super::coordinator::{Protocol, select_source};
+use super::super::detection::is_crio_frame;
 
 const REQUIRED_FRAMES: usize = 3;
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);

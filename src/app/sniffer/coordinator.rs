@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 
-use super::{capture, serial};
+use super::{ascii, llc};
 
 const NONE: u8 = 0;
 
@@ -27,14 +27,14 @@ pub fn run(ethernet: &str, serial_port: &str) -> Result<(), String> {
         let interface = ethernet.to_owned();
         let state = Arc::clone(&selected);
 
-        workers.push(thread::spawn(move || capture::run(&interface, &state)));
+        workers.push(thread::spawn(move || llc::run(&interface, &state)));
     }
 
     if !serial_port.trim().is_empty() {
         let port = serial_port.to_owned();
         let state = Arc::clone(&selected);
 
-        workers.push(thread::spawn(move || serial::run(&port, &state)));
+        workers.push(thread::spawn(move || ascii::run(&port, &state)));
     }
 
     if workers.is_empty() {
