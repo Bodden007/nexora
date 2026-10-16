@@ -10,9 +10,10 @@ pub fn run() -> Result<(), String> {
     println!("CompactRIO: {}", configuration.ethernet.interface);
     println!("Modbus TCP: {}", configuration.modbus.interface);
 
-    if !configuration.ethernet.interface.is_empty() {
-        sniffer::run(&configuration.ethernet.interface)?;
-    }
+    sniffer::run(
+        &configuration.ethernet.interface,
+        &configuration.serial.port,
+    )?;
 
     Ok(())
 }

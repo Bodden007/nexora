@@ -1,3 +1,6 @@
 mod capture;
+mod coordinator;
+mod detector;
+mod serial;
 
-pub use capture::run;
+pub use coordinator::run;
